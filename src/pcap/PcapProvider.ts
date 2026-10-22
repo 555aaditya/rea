@@ -308,11 +308,14 @@ export class PcapProvider {
           cleanup.capturedOutput,
         );
         if (retainedCommand !== undefined) retainedCommand.failure = pending;
+        // The classified failure may own its own cleanup, such as an
+        // executable re-read whose file close failed; keep both live.
+        const primary = this.analysisFailure(cause, operation);
         throw analysisErrorWithCleanupFailure(
-          this.analysisFailure(cause, operation),
+          primary,
           pending,
           operation,
-        ).bindCleanupDependencies([pending]);
+        ).bindCleanupDependencies([primary, pending]);
       }
       throw cause;
     }

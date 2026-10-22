@@ -6,6 +6,7 @@ import {
   AnalysisArtifactChangedError,
   AnalysisCancelledError,
 } from "../../../src/domain/analysisErrorCore.js";
+import { AnalysisCleanupLease } from "../../../src/artifacts/AnalysisCleanupLease.js";
 import { ArtifactReaderFailure } from "../../../src/artifacts/ArtifactReader.js";
 import { readStableArtifact } from "../../../src/artifacts/readStableArtifact.js";
 import { ProviderCleanupError } from "../../../src/domain/providerCleanupError.js";
@@ -114,7 +115,7 @@ const fixture = async (
 
 // The tshark version probe's owned process cleanup fails once, and the tool's
 // bytes appear changed when the probe re-reads it after the run.
-const probeCleanupFixture = async () => {
+const probeCleanupFixture = async (rereadCloseFailure = false) => {
   const root = await createTestTempDirectory("rea-pcap-probe-cleanup-");
   const tools = await writeTools(root, "complete");
   const tshark = await realpath(tools.tshark);
@@ -140,9 +141,13 @@ const probeCleanupFixture = async () => {
     if (args[0] !== tshark) return snapshot;
     tsharkReads += 1;
     // Reads: identity capture, pre-run check, post-run check.
-    return tsharkReads === 3
-      ? { ...snapshot, sha256: "0".repeat(64) }
-      : snapshot;
+    if (tsharkReads !== 3) return snapshot;
+    if (!rereadCloseFailure) return { ...snapshot, sha256: "0".repeat(64) };
+    const resource = `executable-read:${tshark}`;
+    throw new ArtifactReaderFailure("io", "injected executable read failure", {
+      cleanup: { reason: "injected file close failure", resources: [resource] },
+      cleanupLeases: [new AnalysisCleanupLease(async () => {}, [resource])],
+    });
   };
   const provider = new PcapProvider({
     environment: {
@@ -174,6 +179,23 @@ it("reports a probe's pending cleanup when its post-run identity check fails", a
       path.startsWith("process-group:"),
     ),
   ).toBe(true);
+});
+
+it("keeps an executable re-read's own cleanup live beside the probe's pending cleanup", async () => {
+  const provider = await probeCleanupFixture(true);
+  const result = await provider.execute({
+    operation: "inspect_pcap_client",
+    input: {},
+  });
+  expect(result.ok).toBe(false);
+  if (result.ok) return;
+  expect(result.error.cleanupIncomplete).toBe(true);
+  expect(result.error.cleanupResources).toEqual(
+    expect.arrayContaining([
+      expect.stringMatching(/^executable-read:/u),
+      expect.stringMatching(/^process-group:/u),
+    ]),
+  );
 });
 
 it("availability surfaces a probe's pending cleanup instead of reporting the tool unavailable", async () => {
