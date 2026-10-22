@@ -328,7 +328,7 @@ export class PcapProvider {
         )
           throw new PcapConfigurationFailure(
             `${name}_missing`,
-            `The selected ${name} executable could not be found at its configured path.`,
+            `The selected ${name} executable ${selected.command} could not be found at its configured path.`,
             { command: selected.command },
             { cause },
           );
