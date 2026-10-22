@@ -26,7 +26,7 @@ const fixture = async (mode = "ok", failCleanup = false) => {
   await writeFile(
     script,
     `import {readFileSync, writeFileSync, chmodSync, truncateSync} from 'node:fs';
-if (process.argv.includes('--version')) { console.log(${JSON.stringify(mode)} === 'bad-version' ? 'TShark (Wireshark) 3.0.0' : 'TShark (Wireshark) 4.6.9 (fixture)'); console.error('version warning'); }
+if (process.argv.includes('--version')) { console.log(${JSON.stringify(mode)} === 'bad-version' ? 'TShark (Wireshark) 3.0.0' : ${JSON.stringify(mode)} === 'foreign-version' ? 'tcpdump version 4.99.4' : 'TShark (Wireshark) 4.6.9 (fixture)'); console.error('version warning'); }
 else if (${JSON.stringify(mode)} === 'nonzero') { console.error('invalid decoder'); process.exitCode = 1; }
 else if (${JSON.stringify(mode)} === 'malformed-copy') { chmodSync('capture', 0o600); writeFileSync('capture', 'changed'); }
 else if (${JSON.stringify(mode)} === 'oversized-copy') { chmodSync('capture', 0o600); truncateSync('capture', 32 * 1024 * 1024 + 1); console.log('[]'); }
@@ -424,6 +424,32 @@ it("selects TShark from PATH with the shared rule and records the selection", as
     },
   });
 });
+
+it.each([
+  [
+    "bad-version",
+    "Packet capture inspection currently requires Wireshark 4.x tools",
+  ],
+  [
+    "foreign-version",
+    "Expected TShark 4.x; inspect the selected installation.",
+  ],
+] as const)(
+  "refuses an unadmitted version banner before dissection: %s",
+  async (mode, reason) => {
+    const f = await fixture(mode);
+    const result = await f.service.inspect({
+      path: f.path,
+      fields: ["ip.addr"],
+    });
+    if (result.ok) throw new Error("Expected version refusal");
+    expect(result.error).toMatchObject({
+      _tag: "AnalysisCapabilityUnavailableError",
+      reason: expect.stringContaining(reason),
+    });
+    expect(f.calls()).toBe(1);
+  },
+);
 
 it("refuses a relative REA_TSHARK_COMMAND instead of searching PATH", async () => {
   const provider = new TsharkCaptureProvider(

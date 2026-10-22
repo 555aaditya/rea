@@ -101,7 +101,8 @@ describe("locateWiresharkTool", () => {
     "uses the first absolute PATH entry holding an executable regular file",
     async () => {
       const root = await createTestTempDirectory("rea-wireshark-path-");
-      const relative = join(root, "relative");
+      // An absolute PATH entry that does not exist must be skipped.
+      const missingDirectory = join(root, "missing-directory");
       const notExecutable = join(root, "not-executable");
       const directoryEntry = join(root, "directory-entry");
       const selected = join(root, "selected");
@@ -117,7 +118,7 @@ describe("locateWiresharkTool", () => {
       }
       const PATH = [
         "relative-entry",
-        relative,
+        missingDirectory,
         notExecutable,
         directoryEntry,
         selected,
@@ -130,7 +131,7 @@ describe("locateWiresharkTool", () => {
       expect(
         locateWiresharkTool(
           { command: "tshark", source: "path" },
-          { PATH: [relative, notExecutable, directoryEntry].join(":") },
+          { PATH: [missingDirectory, notExecutable, directoryEntry].join(":") },
         ),
       ).toBeUndefined();
       expect(
