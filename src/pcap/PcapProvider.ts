@@ -102,6 +102,27 @@ const pcapPartialEvidence = (
 /** Completed Pcap output whose only failure is its retained command cleanup. */
 class PcapCommandCleanupError extends ProviderCleanupError {}
 
+/** Report a probe whose owned command still needs cleanup after it returned. */
+const probeCleanupFailure = (
+  operation: PcapOperation,
+  cleanup: PcapCommandCleanup,
+  output: { readonly stdout: string; readonly stderr: string },
+): ProviderCleanupError =>
+  new ProviderCleanupError(
+    "pcap",
+    cleanup.resources,
+    {
+      reason: cleanup.reason,
+      previous_error: null,
+      captured_output: {
+        stdout: output.stdout,
+        stderr: output.stderr,
+        truncated: cleanup.capturedOutput.truncated,
+      },
+    },
+    { operation },
+  );
+
 const pcapCommandCleanupError = (
   operation: PcapOperation,
   snapshotPath: string | undefined,
@@ -201,6 +222,7 @@ export class PcapProvider {
     let cleanup: PcapCommandCleanup | undefined;
     let retainedCommand: RetainedPcapCommand | undefined;
     let output: Awaited<ReturnType<typeof runPcapCommand>>;
+    let commandReturned = false;
     const selected = this.wiresharkIdentities.get(command);
     try {
       if (selected !== undefined) {
@@ -247,6 +269,7 @@ export class PcapProvider {
           cleanup = { reason, resources, capturedOutput };
         },
       });
+      commandReturned = true;
       if (selected !== undefined) {
         const after = await this.#resources.read(
           selected.path,
@@ -271,25 +294,30 @@ export class PcapProvider {
         retainedCommand !== undefined &&
         cause instanceof AnalysisError &&
         cause.cleanupIncomplete
-      )
+      ) {
         retainedCommand.failure = cause;
+        throw cause;
+      }
+      // A returned probe has no snapshot to carry its pending command cleanup,
+      // so a later failure (such as the post-run identity check) must carry it.
+      // Failures raised by the command itself keep their own cleanup outcome.
+      if (commandReturned && inputPath === undefined && cleanup !== undefined) {
+        const pending = probeCleanupFailure(
+          operation,
+          cleanup,
+          cleanup.capturedOutput,
+        );
+        if (retainedCommand !== undefined) retainedCommand.failure = pending;
+        throw analysisErrorWithCleanupFailure(
+          this.analysisFailure(cause, operation),
+          pending,
+          operation,
+        ).bindCleanupDependencies([pending]);
+      }
       throw cause;
     }
     if (inputPath === undefined && cleanup !== undefined) {
-      const failure = new ProviderCleanupError(
-        "pcap",
-        cleanup.resources,
-        {
-          reason: cleanup.reason,
-          previous_error: null,
-          captured_output: {
-            stdout: output.stdout,
-            stderr: output.stderr,
-            truncated: cleanup.capturedOutput.truncated,
-          },
-        },
-        { operation },
-      );
+      const failure = probeCleanupFailure(operation, cleanup, output);
       if (retainedCommand !== undefined) retainedCommand.failure = failure;
       throw failure;
     }
@@ -435,7 +463,7 @@ export class PcapProvider {
       };
     } catch (cause) {
       if (
-        cause instanceof ProviderCleanupError ||
+        (cause instanceof AnalysisError && cause.cleanupIncomplete) ||
         cause instanceof AnalysisCancelledError
       )
         throw cause;
@@ -611,6 +639,45 @@ export class PcapProvider {
     }, options?.signal);
   }
 
+  /** Classify a request failure the same way for every pcap operation. */
+  private analysisFailure(
+    cause: unknown,
+    operation: PcapOperation,
+  ): AnalysisError {
+    const classifyArtifactFailure = (failure: unknown): AnalysisError =>
+      failure instanceof AnalysisError
+        ? failure
+        : failure instanceof ArtifactReaderFailure &&
+            failure.reason === "cancelled"
+          ? new AnalysisCancelledError(operation, {
+              cause: artifactFileCancellationCause(failure),
+              ...(failure.partialObservation === undefined
+                ? {}
+                : { partialObservation: failure.partialObservation }),
+            })
+          : new AnalysisProtocolError(
+              `Packet-capture analysis failed: ${failure instanceof Error ? failure.message : String(failure)}`,
+              { cause: failure },
+            );
+    return cause instanceof ArtifactReaderFailure
+      ? this.#resources.cleanupFailure(
+          cause,
+          classifyArtifactFailure,
+          undefined,
+          operation,
+        )
+      : cause instanceof AnalysisError
+        ? cause
+        : cause instanceof PcapConfigurationFailure
+          ? pcapToolUnavailable(operation, cause.message, {
+              cause,
+            })
+          : new AnalysisProtocolError(
+              `Packet-capture analysis failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+              { cause },
+            );
+  }
+
   private async executeAdmitted(
     request: PcapRequest,
     options?: ExecutionOptions,
@@ -669,40 +736,7 @@ export class PcapProvider {
         );
       }
     } catch (cause) {
-      const classifyArtifactFailure = (failure: unknown): AnalysisError =>
-        failure instanceof AnalysisError
-          ? failure
-          : failure instanceof ArtifactReaderFailure &&
-              failure.reason === "cancelled"
-            ? new AnalysisCancelledError(request.operation, {
-                cause: artifactFileCancellationCause(failure),
-                ...(failure.partialObservation === undefined
-                  ? {}
-                  : { partialObservation: failure.partialObservation }),
-              })
-            : new AnalysisProtocolError(
-                `Packet-capture analysis failed: ${failure instanceof Error ? failure.message : String(failure)}`,
-                { cause: failure },
-              );
-      result = err(
-        cause instanceof ArtifactReaderFailure
-          ? this.#resources.cleanupFailure(
-              cause,
-              classifyArtifactFailure,
-              undefined,
-              request.operation,
-            )
-          : cause instanceof AnalysisError
-            ? cause
-            : cause instanceof PcapConfigurationFailure
-              ? pcapToolUnavailable(request.operation, cause.message, {
-                  cause,
-                })
-              : new AnalysisProtocolError(
-                  `Packet-capture analysis failed: ${cause instanceof Error ? cause.message : String(cause)}`,
-                  { cause },
-                ),
-      );
+      result = err(this.analysisFailure(cause, request.operation));
     }
     if (signal?.aborted && result.ok)
       result = err(

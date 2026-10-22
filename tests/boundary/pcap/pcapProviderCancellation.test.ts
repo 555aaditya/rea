@@ -1,8 +1,11 @@
-import { writeFile } from "node:fs/promises";
+import { realpath, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { expect, onTestFinished, test, vi } from "vitest";
 
-import { AnalysisCancelledError } from "../../../src/domain/analysisErrorCore.js";
+import {
+  AnalysisArtifactChangedError,
+  AnalysisCancelledError,
+} from "../../../src/domain/analysisErrorCore.js";
 import { ArtifactReaderFailure } from "../../../src/artifacts/ArtifactReader.js";
 import { readStableArtifact } from "../../../src/artifacts/readStableArtifact.js";
 import { ProviderCleanupError } from "../../../src/domain/providerCleanupError.js";
@@ -108,6 +111,84 @@ const fixture = async (
   onTestFinished(async () => provider.close());
   return { provider, root, capture, cleanupAttempts: () => cleanupAttempts };
 };
+
+// The tshark version probe's owned process cleanup fails once, and the tool's
+// bytes appear changed when the probe re-reads it after the run.
+const probeCleanupFixture = async () => {
+  const root = await createTestTempDirectory("rea-pcap-probe-cleanup-");
+  const tools = await writeTools(root, "complete");
+  const tshark = await realpath(tools.tshark);
+  let tsharkReads = 0;
+  let probeCleanupAttempts = 0;
+  const launcher: PcapCommandLauncher = async (spawn) => {
+    const launched = await spawnOwnedProviderProcess(spawn);
+    if (!spawn.arguments.includes("--version")) return launched;
+    const cleanup =
+      launched.cleanup ?? (() => cleanupOwnedProcessGroup(launched.ownership));
+    return {
+      ...launched,
+      cleanup: async () => {
+        probeCleanupAttempts += 1;
+        if (probeCleanupAttempts === 1)
+          throw new Error("injected probe cleanup failure");
+        return cleanup();
+      },
+    };
+  };
+  const artifactReader: typeof readStableArtifact = async (...args) => {
+    const snapshot = await readStableArtifact(...args);
+    if (args[0] !== tshark) return snapshot;
+    tsharkReads += 1;
+    // Reads: identity capture, pre-run check, post-run check.
+    return tsharkReads === 3
+      ? { ...snapshot, sha256: "0".repeat(64) }
+      : snapshot;
+  };
+  const provider = new PcapProvider({
+    environment: {
+      REA_TSHARK_COMMAND: tools.tshark,
+      REA_CAPINFOS_COMMAND: tools.capinfos,
+    },
+    launcher,
+    artifactReader,
+  });
+  onTestFinished(async () => provider.close());
+  return provider;
+};
+
+it("reports a probe's pending cleanup when its post-run identity check fails", async () => {
+  const provider = await probeCleanupFixture();
+  const result = await provider.execute({
+    operation: "inspect_pcap_client",
+    input: {},
+  });
+  expect(result.ok).toBe(false);
+  if (result.ok) return;
+  expect(result.error.cleanupIncomplete).toBe(true);
+  expect(projectAnalysisError(result.error).code).toBe("cleanup_incomplete");
+  expect(result.error.cleanupPrimary).toBeInstanceOf(
+    AnalysisArtifactChangedError,
+  );
+  expect(
+    result.error.cleanupResources.some((path) =>
+      path.startsWith("process-group:"),
+    ),
+  ).toBe(true);
+});
+
+it("availability surfaces a probe's pending cleanup instead of reporting the tool unavailable", async () => {
+  const provider = await probeCleanupFixture();
+  let failure: unknown;
+  try {
+    await provider.inspectAvailability();
+  } catch (cause) {
+    failure = cause;
+  }
+  expect(failure).toMatchObject({ cleanupIncomplete: true });
+  expect(
+    (failure as { cleanupPrimary?: unknown }).cleanupPrimary,
+  ).toBeInstanceOf(AnalysisArtifactChangedError);
+});
 
 it("availability preserves the producer's exact cancellation reason", async () => {
   const controller = new AbortController();
