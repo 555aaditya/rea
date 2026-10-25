@@ -36,6 +36,8 @@ interface ClassRecord {
   readonly fields: Map<string, MemberRecord<MappedField>[]>;
   /** Outermost frames only, deduplicated across line-range splits. */
   readonly methods: Map<string, MemberRecord<MappedMethod>[]>;
+  /** `methods` entries keyed by obfuscated name and original identity. */
+  readonly methodIndex: Map<string, MemberRecord<MappedMethod>[]>;
 }
 
 /** Facts parsed from one R8/ProGuard mapping file. */
@@ -177,31 +179,31 @@ const append = <Value>(
   else list.push(value);
 };
 
-const sameMethod = (left: MappedMethod, right: MappedMethod): boolean =>
-  left.class === right.class &&
-  left.name === right.name &&
-  left.return_type === right.return_type &&
-  left.parameter_types.join(",") === right.parameter_types.join(",");
+// Validated names and types hold no whitespace, so spaces separate safely.
+const methodKey = (obfuscated: string, method: MappedMethod): string =>
+  `${obfuscated} ${method.class} ${method.name} ${method.return_type} ${method.parameter_types.join(",")}`;
 
 /** Commit a frame stack's outermost original, merging line-range splits. */
 const closeGroup = (state: ParseState): void => {
   const group = state.group;
   state.group = undefined;
   if (group === undefined) return;
-  const list = group.record.methods.get(group.obfuscated) ?? [];
-  const same = list.find(
-    (candidate) =>
-      sameMethod(candidate.mapped, group.outermost) &&
-      (candidate.residual === undefined ||
+  const key = methodKey(group.obfuscated, group.outermost);
+  const same = group.record.methodIndex
+    .get(key)
+    ?.find(
+      (candidate) =>
+        candidate.residual === undefined ||
         group.residual === undefined ||
-        candidate.residual === group.residual),
-  );
-  if (same === undefined)
-    append(group.record.methods, group.obfuscated, {
-      mapped: group.outermost,
-      residual: group.residual,
-    });
-  else same.residual ??= group.residual;
+        candidate.residual === group.residual,
+    );
+  if (same !== undefined) {
+    same.residual ??= group.residual;
+    return;
+  }
+  const record = { mapped: group.outermost, residual: group.residual };
+  append(group.record.methods, group.obfuscated, record);
+  append(group.record.methodIndex, key, record);
 };
 
 const parseClassLine = (state: ParseState, line: string, number: number) => {
@@ -218,6 +220,7 @@ const parseClassLine = (state: ParseState, line: string, number: number) => {
     name: original,
     fields: new Map(),
     methods: new Map(),
+    methodIndex: new Map(),
   };
   state.current = record;
   state.records.classes++;
@@ -257,8 +260,8 @@ const parseMethod = (state: ParseState, record: ClassRecord, line: string) => {
     returnType = "",
     name = "",
     args = "",
-    ,
-    ,
+    originalStart,
+    originalEnd,
     obfuscated = "",
   ] = match;
   const parameters = args === "" ? [] : args.split(",");
@@ -276,11 +279,15 @@ const parseMethod = (state: ParseState, record: ClassRecord, line: string) => {
   };
   state.records.methods++;
   const group = state.group;
+  // A caller frame records its single call-site line (`:7`); a line with an
+  // original range is a separate method that happens to share the range.
   if (
     group !== undefined &&
     range !== null &&
     group.obfuscated === obfuscated &&
-    group.range === range
+    group.range === range &&
+    originalStart !== undefined &&
+    originalEnd === undefined
   ) {
     group.outermost = mapped;
     return true;

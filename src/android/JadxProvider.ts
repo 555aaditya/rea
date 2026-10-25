@@ -330,19 +330,6 @@ export class JadxProvider implements AndroidAnalysisPort {
       options?.signal === undefined
         ? this.#shutdown.signal
         : AbortSignal.any([options.signal, this.#shutdown.signal]);
-    // Read the caller's mapping before queueing. Its failure is the caller's
-    // input, so it never reaches the JADX session or retires it.
-    const mapping =
-      "mapping_path" in request.input &&
-      request.input.mapping_path !== undefined
-        ? await readAndroidMapping(
-            request.input.mapping_path,
-            request.operation,
-            this.#prerequisites,
-            signal,
-          )
-        : undefined;
-    if (mapping?.ok === false) return mapping;
     const predecessor = this.#tail;
     let release: () => void = () => {};
     this.#tail = new Promise<void>((resolve) => {
@@ -365,6 +352,20 @@ export class JadxProvider implements AndroidAnalysisPort {
             cause: signal.reason,
           }),
         );
+      // Read the mapping inside the turn so only one parsed mapping is held at
+      // a time. Its failure is the caller's input: it returns before the JADX
+      // session is touched, so it never starts or retires one.
+      const mapping =
+        "mapping_path" in request.input &&
+        request.input.mapping_path !== undefined
+          ? await readAndroidMapping(
+              request.input.mapping_path,
+              request.operation,
+              this.#prerequisites,
+              signal,
+            )
+          : undefined;
+      if (mapping?.ok === false) return mapping;
       clearTimeout(this.#idle);
       if (this.#pendingCleanup !== undefined) {
         const retired = await this.#retire();

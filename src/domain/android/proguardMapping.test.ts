@@ -152,6 +152,39 @@ it.each([
   },
 );
 
+it("keeps same-range overloads that are not an inline stack", () => {
+  const overloads = parse(
+    [
+      "com.example.Owner -> a.o:",
+      "    1:1:void first():1:1 -> a",
+      "    1:1:void second(int):1:1 -> a",
+    ].join("\n"),
+  );
+  const owner = { class: "com.example.Owner", return_type: "void" };
+  expect(
+    resolveProguardMethod(overloads, {
+      className: "a.o",
+      name: "a",
+      descriptor: "()V",
+    }),
+  ).toEqual({
+    status: "mapped",
+    mapped: { ...owner, name: "first", parameter_types: [] },
+    verified_by: "descriptor",
+  });
+  expect(
+    resolveProguardMethod(overloads, {
+      className: "a.o",
+      name: "a",
+      descriptor: "(I)V",
+    }),
+  ).toEqual({
+    status: "mapped",
+    mapped: { ...owner, name: "second", parameter_types: ["int"] },
+    verified_by: "descriptor",
+  });
+});
+
 it("never maps a lone name-only method candidate", () => {
   expect(
     resolveProguardMethod(mapping, {

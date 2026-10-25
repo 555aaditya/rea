@@ -262,13 +262,16 @@ renamed reserved word. Each symbol resolves as:
   whose prototype or type does not verify is never reported as mapped.
 - `unmapped`: no valid record matched the raw identity.
 
-For inline frames, only the outermost original becomes a candidate. Original
+A line continues an inline frame stack when it repeats the previous line's
+minified range and obfuscated name and gives a single call-site line, such as
+`:7`. Only the outermost original of a stack becomes a candidate. Original
 line numbers and source files are not projected. Malformed records are counted
 and skipped, so an `unmapped` symbol might be described by one of them. A file
 that is missing, not a regular file, not UTF-8, larger than the byte limit or
 without any class record, such as `usage.txt` or `seeds.txt`, is refused before
-the request is queued. A mapping failure therefore never starts or retires the
-JADX session, and a different mapping reuses the loaded APK.
+JADX is used. Requests read their mappings one at a time, in the same queue as
+the JADX work. A mapping failure therefore never starts or retires the JADX
+session, and a different mapping reuses the loaded APK.
 
 ## Interpret the result
 
@@ -486,7 +489,8 @@ complete, case-sensitive search contract. A protocol frame above **8 MiB**, or c
 as complete. These are memory-safety boundaries, not undocumented result caps.
 
 A selected R8/ProGuard mapping is read once per call, up to **64 MiB**, and
-parsed in memory without caching. This is a fixed memory bound with no runtime
+parsed in memory without caching. Calls are serialized, so one parsed mapping
+is held at a time. This is a fixed memory bound with no runtime
 override; a larger file fails with `resource_constraint`.
 
 ## Real verification
