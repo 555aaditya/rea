@@ -20,6 +20,8 @@ import {
 import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import { analysisErrorWithCleanupFailure } from "../domain/analysisErrorCleanup.js";
 import type { AndroidRequest } from "../domain/android/androidAnalysis.js";
+import type { AndroidMappingSource } from "../domain/android/androidMapping.js";
+import { readAndroidMapping } from "./AndroidMappingFile.js";
 import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
 import { err, ok, type Result } from "../domain/result.js";
 import {
@@ -328,6 +330,19 @@ export class JadxProvider implements AndroidAnalysisPort {
       options?.signal === undefined
         ? this.#shutdown.signal
         : AbortSignal.any([options.signal, this.#shutdown.signal]);
+    // Read the caller's mapping before queueing. Its failure is the caller's
+    // input, so it never reaches the JADX session or retires it.
+    const mapping =
+      "mapping_path" in request.input &&
+      request.input.mapping_path !== undefined
+        ? await readAndroidMapping(
+            request.input.mapping_path,
+            request.operation,
+            this.#prerequisites,
+            signal,
+          )
+        : undefined;
+    if (mapping?.ok === false) return mapping;
     const predecessor = this.#tail;
     let release: () => void = () => {};
     this.#tail = new Promise<void>((resolve) => {
@@ -355,7 +370,12 @@ export class JadxProvider implements AndroidAnalysisPort {
         const retired = await this.#retire();
         if (!retired.ok) return retired;
       }
-      const outcome = await this.#execute(target, request, { signal });
+      const outcome = await this.#execute(
+        target,
+        request,
+        { signal },
+        mapping?.value,
+      );
       if (outcome.ok) this.#scheduleIdle();
       return outcome;
     } finally {
@@ -440,7 +460,8 @@ export class JadxProvider implements AndroidAnalysisPort {
   async #execute(
     target: BinaryTarget,
     request: AndroidRequest,
-    options?: ExecutionOptions,
+    options: ExecutionOptions,
+    mapping: AndroidMappingSource | undefined,
   ): Promise<Outcome> {
     // Resolve the accepted operation's override before acquiring any resource.
     // An unusable launch value is refused without starting the engine.
@@ -452,7 +473,7 @@ export class JadxProvider implements AndroidAnalysisPort {
     if (!timeoutMs.ok) return timeoutMs;
     const timeout = AbortSignal.timeout(timeoutMs.value);
     const signal =
-      options?.signal === undefined
+      options.signal === undefined
         ? timeout
         : AbortSignal.any([options.signal, timeout]);
     let root: JadxWorkspaceRoot | undefined;
@@ -616,6 +637,7 @@ export class JadxProvider implements AndroidAnalysisPort {
           bridgeHash: retained.bridgeHash,
           signal: activeSignal,
           timeoutMs: timeoutMs.value,
+          mapping,
         }),
       );
       throwIfJadxInterrupted(activeSignal);
@@ -627,7 +649,7 @@ export class JadxProvider implements AndroidAnalysisPort {
         request,
         timeout,
         timeoutMs: timeoutMs.value,
-        signal: options?.signal,
+        signal: options.signal,
         session,
       });
       // Admission can fail before selecting an existing session for execution.
