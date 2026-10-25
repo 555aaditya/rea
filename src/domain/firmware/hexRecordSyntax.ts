@@ -134,9 +134,15 @@ const parseIntelRecord = (line: Uint8Array): Result<HexRecord, string> => {
     return err(
       `record type ${type} requires ${String(fixed)} data bytes, found ${String(count)}`,
     );
+  const address = readBigEndian(bytes.subarray(1, 3));
+  // Extended address records set the base; their address field must be 0000.
+  if ((typeCode === 2 || typeCode === 4) && address !== 0)
+    return err(
+      `record type ${type} requires address 0x0000, found 0x${hex(address, 4)}`,
+    );
   return ok({
     type,
-    address: readBigEndian(bytes.subarray(1, 3)),
+    address,
     data: bytes.subarray(4, 4 + count),
   });
 };

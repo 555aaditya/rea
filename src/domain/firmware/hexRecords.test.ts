@@ -171,6 +171,16 @@ describe("Intel HEX decoding", () => {
       "line 1: record type 04 requires 2 data bytes, found 1",
     ],
     [
+      "extended address with a non-zero address field",
+      ":020001040800F1\n",
+      "line 1: record type 04 requires address 0x0000, found 0x0001",
+    ],
+    [
+      "segment address with a non-zero address field",
+      `${intelHexRecord(2, 0x10, [0x10, 0x00])}\n`,
+      "line 1: record type 02 requires address 0x0000, found 0x0010",
+    ],
+    [
       "offset wrap",
       ":020000040000FA\n:10FFF800000102030405060708090A0B0C0D0E0F81\n:00000001FF\n",
       "line 2: data at offset 0xfff8 with 16 bytes wraps past 0xffff",
