@@ -270,7 +270,7 @@ and skipped, so an `unmapped` symbol might be described by one of them. A file
 that is missing, not a regular file, not UTF-8, larger than the byte limit or
 without any class record, such as `usage.txt` or `seeds.txt`, is refused before
 JADX is used. Requests read their mappings one at a time, in the same queue as
-the JADX work. A mapping failure therefore never starts or retires the JADX
+the JADX work and under the same operation deadline. A mapping failure therefore never starts or retires the JADX
 session, and a different mapping reuses the loaded APK.
 
 ## Interpret the result
