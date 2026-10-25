@@ -67,6 +67,7 @@ import {
   MAX_XML_PLIST_PROBE_BYTES,
 } from "../domain/apple/appleArchiveFormat.js";
 import { hasGodotPckHeader } from "../domain/godotPckFormat.js";
+import { detectHexRecordEncoding } from "../domain/firmware/hexRecords.js";
 import {
   hasZipSignature,
   locateTrailingZipArchive,
@@ -654,6 +655,10 @@ const detectArtifactFormat = async (
     return zipRootPackageFormat(lower);
   if (hasGodotPckHeader(magic.subarray(0, observed.bytesRead)))
     return "godot-pck";
+  const hexRecords = detectHexRecordEncoding(
+    magic.subarray(0, observed.bytesRead),
+  );
+  if (hexRecords !== undefined) return hexRecords;
   // Binary plists, including keyed archives, often use other extensions.
   if (hasBinaryPlistSignature(magic.subarray(0, observed.bytesRead)))
     return "plist";
@@ -734,7 +739,7 @@ const isArchiveFormat = (
   >,
 ): format is Extract<BinaryTarget, { kind: "archive" }>["format"] =>
   isZipPackageFormat(format) ||
-  ["asar", "godot-pck", "dmg", "pkg"].includes(format);
+  ["asar", "godot-pck", "dmg", "pkg", "intel-hex", "srec"].includes(format);
 
 /** Whether the leading bytes begin any executable header family, valid or not. */
 const claimsLeadingExecutableHeader = async (
