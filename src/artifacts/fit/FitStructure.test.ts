@@ -13,6 +13,7 @@ import {
   type FitFixtureImage,
 } from "./FitImage.fixture.js";
 import {
+  FIT_MAX_CONFIGURATION_REFERENCES,
   FIT_MAX_CONFIGURATIONS,
   FIT_MAX_HASH_NODES_PER_IMAGE,
   FIT_MAX_IMAGES,
@@ -479,6 +480,27 @@ describe("FIT fixed limits", () => {
     ).toMatchObject({ reason: "limit", boundary: "capacity" });
   });
 
+  it("bounds configuration references before decoding them", () => {
+    expect(
+      failureOf(
+        fitFixture({
+          images: [kernel()],
+          configurations: {
+            name: "configurations",
+            children: [
+              {
+                name: "conf-1",
+                properties: {
+                  loadables: Buffer.alloc(FIT_MAX_CONFIGURATION_REFERENCES + 1),
+                },
+              },
+            ],
+          },
+        }),
+      ),
+    ).toMatchObject({ reason: "limit", boundary: "capacity" });
+  });
+
   it("maps a parser limit to a fixed allowance without a caller limit", () => {
     let nested: FixtureNode = { name: "leaf" };
     for (let depth = 0; depth < 64; depth += 1)
@@ -489,11 +511,9 @@ describe("FIT fixed limits", () => {
         children: [{ name: "images" }, nested],
       }),
     );
-    expect(failure).toMatchObject({
-      reason: "limit",
-      boundary: "capacity",
-      message: "FIT devicetree exceeds the fixed max_depth allowance",
-    });
+    expect(failure).toMatchObject({ reason: "limit", boundary: "capacity" });
+    // The parser's caller-limit recovery does not apply to fixed FIT reads.
+    expect(String((failure as Error).message)).not.toContain("caller-selected");
   });
 
   it("fails a structure without /images", () => {

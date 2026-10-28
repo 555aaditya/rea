@@ -21,6 +21,8 @@ import { ArtifactReaderFailure } from "../ArtifactReader.js";
 export const FIT_MAX_IMAGES = 1024;
 export const FIT_MAX_HASH_NODES_PER_IMAGE = 8;
 export const FIT_MAX_CONFIGURATIONS = 1024;
+/** Bounds configuration references and their limitations across the FIT. */
+export const FIT_MAX_CONFIGURATION_REFERENCES = 16_384;
 
 type FitNode = Devicetree["nodes"][number];
 type FitProperty = FitNode["properties"][number];
@@ -66,6 +68,13 @@ const DIGEST_BYTES = new Map([
   ["sha512", 64],
 ]);
 const DATA_SOURCES = ["data", "data-offset", "data-position"] as const;
+const CONFIGURATION_REFERENCES = [
+  "kernel",
+  "firmware",
+  "fdt",
+  "ramdisk",
+  "loadables",
+] as const;
 
 const align4 = (value: number): number => Math.ceil(value / 4) * 4;
 const formatFailure = (detail: string): ArtifactReaderFailure =>
@@ -80,14 +89,24 @@ const valueOf = (fdt: Buffer, property: FitProperty): Buffer =>
   fdt.subarray(property.offset, property.offset + property.bytes);
 
 const utf8 = new TextDecoder("utf-8", { fatal: true });
-/** NUL-terminated UTF-8 strings, or undefined when the value is malformed. */
+const nulCount = (raw: Buffer): number => {
+  let count = 0;
+  for (const byte of raw) if (byte === 0) count += 1;
+  return count;
+};
+
+/**
+ * NUL-terminated UTF-8 strings, or undefined when the value is malformed.
+ * More than `maxStrings` strings is malformed, counted before splitting.
+ */
 const nulStrings = (
   fdt: Buffer,
   property: FitProperty | undefined,
+  maxStrings = 1,
 ): string[] | undefined => {
   if (property === undefined) return undefined;
   const raw = valueOf(fdt, property);
-  if (raw.at(-1) !== 0) return undefined;
+  if (raw.at(-1) !== 0 || nulCount(raw) > maxStrings) return undefined;
   try {
     return utf8.decode(raw.subarray(0, -1)).split("\0");
   } catch {
@@ -132,7 +151,12 @@ const fitString: FitFact<string | null> = (facts, node, name) => {
 const fitStrings: FitFact<string[]> = (facts, node, name) => {
   const property = propertyOf(node, name);
   if (property === undefined) return [];
-  const strings = nulStrings(facts.fdt, property);
+  // fitConfigurations bounds every reference list before decoding.
+  const strings = nulStrings(
+    facts.fdt,
+    property,
+    FIT_MAX_CONFIGURATION_REFERENCES,
+  );
   if (strings !== undefined) return strings;
   facts.limitations.push(
     `${node.path}: ${name} is not a NUL-terminated UTF-8 string list`,
@@ -430,6 +454,17 @@ const fitConfigurations = (
   if (children.length > FIT_MAX_CONFIGURATIONS)
     throw capacityFailure(
       `FIT declares ${String(children.length)} configurations, above the fixed ${String(FIT_MAX_CONFIGURATIONS)}-configuration allowance`,
+    );
+  let references = 0;
+  for (const child of children)
+    for (const name of CONFIGURATION_REFERENCES) {
+      const property = propertyOf(child, name);
+      if (property !== undefined)
+        references += nulCount(valueOf(layout.fdt, property));
+    }
+  if (references > FIT_MAX_CONFIGURATION_REFERENCES)
+    throw capacityFailure(
+      `FIT configurations declare ${String(references)} image references, above the fixed ${String(FIT_MAX_CONFIGURATION_REFERENCES)}-reference allowance`,
     );
   const configurations = children.map((child) =>
     fitConfiguration(layout, facts, child, images),

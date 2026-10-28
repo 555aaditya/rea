@@ -8,7 +8,12 @@ import {
   FIT_EMBEDDED,
   FIT_EXTERNAL,
   FIT_KERNEL,
+  fitFixture,
 } from "../../src/artifacts/fit/FitImage.fixture.js";
+import {
+  cells,
+  dtString,
+} from "../../src/firmware/devicetree/Devicetree.fixture.js";
 import { parseEvidence } from "../../src/domain/evidence.js";
 import { artifactInspectionResultSchema } from "../../src/domain/artifactInspection.js";
 import {
@@ -93,3 +98,50 @@ cliTest("rejects a FIT hash mismatch through the CLI", async ({ cli }) => {
     "FIT image kernel hash-1 crc32 does not match",
   );
 });
+
+cliTest(
+  "suggests no direct analysis for compressed or ciphered FIT images",
+  async ({ cli }) => {
+    const directory = await createTestTempDirectory("rea-fit-encoded-cli-");
+    const source = join(directory, "boot.itb");
+    await writeFile(
+      source,
+      fitFixture({
+        images: [
+          {
+            name: "kernel",
+            data: FIT_KERNEL,
+            properties: {
+              compression: dtString("none"),
+              load: cells(0x4020_0000),
+            },
+            children: [
+              { name: "cipher", properties: { algo: dtString("aes256") } },
+            ],
+          },
+          {
+            name: "fdt-1",
+            data: FIT_DEVICETREE,
+            properties: {
+              type: dtString("flat_dt"),
+              compression: dtString("gzip"),
+            },
+          },
+        ],
+      }),
+    );
+    const inspected = await cli.run({
+      arguments: ["inspect-artifact", source, "--json"],
+    });
+    expect(inspected.exitCode, inspected.stdout + inspected.stderr).toBe(0);
+    const inspection = artifactInspectionResultSchema.parse(
+      parseEvidence(inspected.json).normalized_result,
+    );
+    expect(inspection.next_probes.map((probe) => probe.operation)).not.toEqual(
+      expect.arrayContaining(["inspect_devicetree"]),
+    );
+    expect(inspection.next_probes.map((probe) => probe.operation)).not.toEqual(
+      expect.arrayContaining(["open_binary"]),
+    );
+  },
+);
