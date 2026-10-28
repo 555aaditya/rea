@@ -75,6 +75,7 @@ import {
 } from "../domain/apple/appleArchiveFormat.js";
 import { hasDiskImageSignature } from "../domain/apple/diskImageFormat.js";
 import { hasGodotPckHeader } from "../domain/godotPckFormat.js";
+import { hasUImageMagic } from "../domain/uimageFormat.js";
 import { hasUnityFsHeader } from "../domain/unityfsFormat.js";
 import { detectHexRecordEncoding } from "../domain/firmware/hexRecords.js";
 import { hasFitImagesNode } from "../domain/firmware/fitImage.js";
@@ -669,6 +670,7 @@ const detectArtifactFormat = async (
   if (hasZipSignature(magic)) return zipRootPackageFormat(lower);
   if (hasGodotPckHeader(magic)) return "godot-pck";
   if (hasUnityFsHeader(magic)) return "unityfs";
+  if (hasUImageMagic(magic)) return "uimage";
   const hexRecords = detectHexRecordEncoding(magic);
   if (hexRecords !== undefined) return hexRecords;
   if (hasFitImagesNode(magic)) return "fit";
@@ -743,6 +745,7 @@ const isArchiveFormat = (
     "asar",
     "godot-pck",
     "unityfs",
+    "uimage",
     "dmg",
     "pkg",
     "intel-hex",
