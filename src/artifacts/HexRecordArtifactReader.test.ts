@@ -299,3 +299,84 @@ it.each(["cancel", "close"] as const)(
     }
   },
 );
+
+it("retains the caller's cancellation reason after a region stream was opened", async () => {
+  const reader = new HexRecordArtifactReader(
+    await writeImage("stream-cancel.hex", INTEL_HEX_I32_GAP),
+    "intel-hex",
+  );
+  const controller = new AbortController();
+  const reason = { stage: "region consumption" };
+  try {
+    const { value: entry } = await reader
+      .entries()
+      [Symbol.asyncIterator]()
+      .next();
+    if (entry === undefined) throw new Error("Missing region");
+    const stream = await reader.open(entry, controller.signal);
+    controller.abort(reason);
+    await expect(
+      (async () => {
+        for await (const _chunk of stream) {
+          /* drain */
+        }
+      })(),
+    ).rejects.toMatchObject({ reason: "cancelled", cause: reason });
+    await reader.close();
+    expect(stream.closed).toBe(true);
+  } finally {
+    await reader.close();
+  }
+});
+
+it("bounds copied region chunks and isolates cached bytes across opens", async () => {
+  const data = Array.from({ length: 16 }, () => 0);
+  const records = Array.from({ length: 4096 }, (_, index) =>
+    intelHexRecord(0, index * 16, data),
+  );
+  const text = [
+    intelHexRecord(4, 0, [0, 0]),
+    ...records,
+    intelHexRecord(4, 0, [0, 1]),
+    ...records,
+    intelHexRecord(1, 0, []),
+  ].join("\n");
+  const reader = new HexRecordArtifactReader(
+    await writeImage("chunked.hex", text),
+    "intel-hex",
+  );
+  const controller = new AbortController();
+  const reason = { stage: "partial region consumption" };
+  try {
+    const { value: entry } = await reader
+      .entries()
+      [Symbol.asyncIterator]()
+      .next();
+    if (entry === undefined) throw new Error("Missing region");
+    const stream = await reader.open(entry, controller.signal);
+    const iterator = stream[Symbol.asyncIterator]();
+    const { value: first }: { value: unknown } = await iterator.next();
+    if (!Buffer.isBuffer(first)) throw new Error("Expected byte chunk");
+    expect(first.length).toBeLessThanOrEqual(64 * 1024);
+    expect(first.length).toBeLessThan(entry.declaredSize!);
+    first[0] = 42;
+    const reopened = await reader.open(entry);
+    const peer = reopened[Symbol.asyncIterator]();
+    const { value: again }: { value: unknown } = await peer.next();
+    if (!Buffer.isBuffer(again)) throw new Error("Expected byte chunk");
+    expect(again[0]).toBe(0);
+    controller.abort(reason);
+    await expect(iterator.next()).rejects.toMatchObject({
+      reason: "cancelled",
+      cause: reason,
+    });
+    const { value: peerRemainder }: { value: unknown } = await peer.next();
+    if (!Buffer.isBuffer(peerRemainder)) throw new Error("Expected peer bytes");
+    expect(peerRemainder[0]).toBe(0);
+    await reader.close();
+    expect(stream.closed).toBe(true);
+    expect(reopened.closed).toBe(true);
+  } finally {
+    await reader.close();
+  }
+});

@@ -104,12 +104,58 @@ export class HexRecordArtifactReader implements ArtifactReader {
       // Decoded bytes are retained, so only the carrier identity is rechecked.
       await this.#source.read(signal);
       this.#assertOpen(signal);
-      const output = Readable.from([Buffer.from(bytes)]);
+      const output = Readable.from(this.#regionChunks(bytes, signal), {
+        objectMode: false,
+      });
+      const onAbort = (): void => {
+        output.destroy(
+          new ArtifactReaderFailure(
+            "cancelled",
+            `${this.#label} region read cancelled`,
+            { cause: signal?.reason },
+          ),
+        );
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
+      output.once("close", () => signal?.removeEventListener("abort", onAbort));
       output.on("error", () => undefined);
       this.#streams.add(output);
       output.once("close", () => this.#streams.delete(output));
+      // Draining the scope must wait for the readable side, including an
+      // abandoned consumer and an in-flight asynchronous chunk producer.
+      void this.#scope
+        .run(
+          () =>
+            new Promise<void>((resolve) => {
+              output.once("close", () => resolve());
+            }),
+        )
+        .catch((cause: unknown) =>
+          output.destroy(
+            cause instanceof Error
+              ? cause
+              : new ArtifactReaderFailure(
+                  "unavailable",
+                  `${this.#label} stream ownership failed`,
+                  { cause },
+                ),
+          ),
+        );
       return output;
     });
+  }
+
+  async *#regionChunks(
+    bytes: Uint8Array,
+    signal?: AbortSignal,
+  ): AsyncIterable<Buffer> {
+    // Keep cached bytes isolated from consumers without copying a whole
+    // region for every open. Match descriptor reads' 64 KiB chunk size.
+    for (let offset = 0; offset < bytes.length; offset += 64 * 1024) {
+      await setImmediate();
+      this.#assertOpen(signal);
+      yield Buffer.from(bytes.subarray(offset, offset + 64 * 1024));
+    }
   }
 
   async close(): Promise<void> {

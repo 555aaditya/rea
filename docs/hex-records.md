@@ -89,7 +89,14 @@ sequence of consecutive records whose addresses continue each other. Both are
 fixed resource bounds, not format limits, and fail as limits (`file-size` and
 `capacity`) with no runtime override. Configurable ceilings are tracked in
 [#6176](https://github.com/morluto/rea/issues/6176). The line-length limits are
-the format maximum of 255 data bytes per record.
+the one-byte record count: Intel HEX allows 255 data bytes, while S-record
+counts include address and checksum bytes.
+
+Decoded regions are cached only for the reader's lifetime. Each open checks
+its admitted carrier identity again. Region streams copy at most 64 KiB per
+chunk, so consumers cannot mutate cached bytes and opening a large region does
+not copy it in full. Caller cancellation keeps its exact reason, and closing
+the reader waits for active region streams to close.
 
 ## Analyzing a region
 
@@ -106,8 +113,17 @@ may be refused or decoded in ARM state until
 
 ## Verification
 
-Synthetic fixtures with computed checksums cover every record type, failure
-mode and limit, inventory, extraction and reader lifecycle. CLI and stdio MCP
-tests exercise the same artifact provider and advertised schemas. Output from
-real producers such as GNU objcopy or srec_cat has not been verified, and no
-performance claim is made.
+Fixtures with computed checksums cover supported record types, checksums,
+termination, address gaps and overlaps, resource refusals, inventory, extraction
+and reader lifecycle. CLI and stdio MCP tests exercise the same artifact
+provider and advertised schemas, including retained Evidence views.
+
+GNU objcopy 2.40 output was also checked on Linux: the system `true` ELF was
+converted to Intel HEX and S-record, with additional address-rebased I32HEX
+and S37 cases. Each yielded 13 regions. A 19,124,817-byte Intel HEX conversion
+of the system Python 3.11 ELF yielded 11 regions containing 6,799,261 decoded
+bytes. Public CLI inspection and extraction matched GNU BFD address ranges
+and independently exported section bytes. Adjacent GNU sections were joined
+without filling address gaps. These are real producer outputs from system
+applications, not vendor-firmware or target-execution verification; srec_cat
+and other producers remain unverified. No general speedup is claimed.
