@@ -287,3 +287,108 @@ cliTest(
     ).toBe(true);
   },
 );
+
+cliTest.for([
+  {
+    label: "matching entry",
+    arch: "arm",
+    load: cells(0x400000),
+    entry: cells(0x400000),
+    bytes: 4,
+    allowed: true,
+  },
+  {
+    label: "absent entry",
+    arch: "arm",
+    load: cells(0x400000),
+    bytes: 4,
+    allowed: true,
+  },
+  {
+    label: "missing architecture",
+    load: cells(0x400000),
+    bytes: 4,
+    allowed: false,
+  },
+  {
+    label: "unsupported architecture",
+    arch: "mips",
+    load: cells(0x400000),
+    bytes: 4,
+    allowed: false,
+  },
+  {
+    label: "empty image",
+    arch: "arm",
+    load: cells(0x400000),
+    bytes: 0,
+    allowed: false,
+  },
+  {
+    label: "misaligned load",
+    arch: "arm",
+    load: cells(0x400001),
+    bytes: 4,
+    allowed: false,
+  },
+  {
+    label: "mapping beyond address width",
+    arch: "arm",
+    load: cells(0xfffffffc),
+    bytes: 8,
+    allowed: false,
+  },
+  {
+    label: "divergent entry",
+    arch: "arm",
+    load: cells(0x400000),
+    entry: cells(0x400004),
+    bytes: 4,
+    allowed: false,
+  },
+  {
+    label: "unreadable entry",
+    arch: "arm",
+    load: cells(0x400000),
+    entry: cells(1, 2, 3),
+    bytes: 4,
+    allowed: false,
+  },
+])("offers admitted FIT raw analysis ($label)", async (item, { cli }) => {
+  const root = await createTestTempDirectory("rea-fit-raw-probe-");
+  const source = join(root, "raw.itb");
+  await writeFile(
+    source,
+    fitFixture({
+      images: [
+        {
+          name: "kernel",
+          data: Buffer.alloc(item.bytes, 1),
+          properties: {
+            compression: dtString("none"),
+            load: item.load,
+            ...("arch" in item ? { arch: dtString(item.arch) } : {}),
+            ...("entry" in item ? { entry: item.entry } : {}),
+          },
+        },
+      ],
+    }),
+  );
+  const reply = await cli.run({
+    arguments: ["inspect-artifact", source, "--json"],
+  });
+  expect(reply.exitCode, reply.stdout + reply.stderr).toBe(0);
+  const inspection = artifactInspectionResultSchema.parse(
+    parseEvidence(reply.json).normalized_result,
+  );
+  expect(
+    inspection.next_probes.some((probe) => probe.operation === "open_binary"),
+  ).toBe(item.allowed);
+  const graph = artifactInventoryResultSchema.parse(
+    inspection.substeps[0]?.evidence.normalized_result,
+  );
+  expect(
+    graph.occurrences.find((row) => row.logical_path === "images/kernel.bin")
+      ?.declared_size,
+  ).toBe(item.bytes);
+});

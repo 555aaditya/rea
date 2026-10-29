@@ -18,6 +18,7 @@ import {
 } from "./artifactGraph.js";
 import { digestCanonicalValue } from "./canonicalDigest.js";
 import { isJavaScriptSourcePath } from "./javascript/javascriptArtifactFiles.js";
+import { admitRawBinary } from "./rawBinary.js";
 import { uniqueSorted } from "./canonicalOrdering.js";
 import { evidenceSchema, parseEvidence, type Evidence } from "./evidence.js";
 import { jsonValueSchema } from "./jsonValue.js";
@@ -344,11 +345,30 @@ const fitProbes = (
     row.format_metadata?.kind === "fit-image" &&
     row.format_metadata.compression === "none" &&
     row.format_metadata.cipher_present === false
-      ? [row.format_metadata]
+      ? [{ row, image: row.format_metadata }]
       : [],
   );
+  let rawProbe: ArtifactInspectionResult["next_probes"][number] | undefined;
+  for (const { row, image } of images) {
+    if (row.declared_size === null) continue;
+    if (image.entry !== null && image.entry !== image.load) continue;
+    // An unavailable entry is not proof that the declaration was absent.
+    if (image.entry === null && row.limitations.length > 0) continue;
+    const admitted = admitRawBinary({
+      architecture: image.arch,
+      entryPoint: image.load,
+      fileBytes: row.declared_size,
+    });
+    if (!admitted.ok) continue;
+    rawProbe = {
+      operation: "open_binary",
+      rationale: `Extract ${JSON.stringify(row.logical_path)} with extract_artifact, then open those uncompressed, unciphered bytes with format raw-binary, architecture ${admitted.value.architecture} and entry_point ${admitted.value.entryPoint}. This maps offset 0 and seeds analysis at that address; the declared entry is absent or equal to load.`,
+      authority: "native-analysis-provider",
+    };
+    break;
+  }
   return [
-    ...(images.some((image) => image.type === "flat_dt")
+    ...(images.some(({ image }) => image.type === "flat_dt")
       ? [
           {
             operation: "inspect_devicetree",
@@ -358,16 +378,7 @@ const fitProbes = (
           },
         ]
       : []),
-    ...(images.some((image) => image.load !== null)
-      ? [
-          {
-            operation: "open_binary",
-            rationale:
-              "Extract images with extract_artifact, then open an uncompressed, unciphered image with open_binary format raw-binary, an architecture matching its declared arch, and entry_point set to its declared load address (raw-binary maps file offset 0 at entry_point).",
-            authority: "native-analysis-provider" as const,
-          },
-        ]
-      : []),
+    ...(rawProbe === undefined ? [] : [rawProbe]),
   ];
 };
 

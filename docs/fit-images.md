@@ -138,7 +138,12 @@ After extraction:
 - inspect `flat_dt` images with [`inspect_devicetree`](devicetree.md);
 - open an uncompressed image with `open_binary` using format `raw-binary`, an
   architecture matching its declared `arch`, and `entry_point` set to its
-  declared `load` address; raw-binary maps file offset 0 at `entry_point`.
+  declared `load` address; raw-binary maps file offset 0 and seeds analysis at
+  `entry_point`. Automatic suggestions require nonempty bytes, an admitted
+  architecture/address/extent, and a declared entry that is absent or equal to
+  load. Distinct or unreadable entry declarations remain in Evidence without
+  a raw-loader suggestion, since this loader cannot represent separate mapping
+  and analysis entry addresses.
 
 ## Comparison
 
