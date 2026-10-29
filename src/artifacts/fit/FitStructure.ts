@@ -330,22 +330,37 @@ const imageDeclaration = (
   if (imageDataProperty !== undefined && imageData?.length !== 1)
     throw formatFailure(`${node.path}: image-data is not one string`);
   const cipher = children.find((child) => nodeName(child) === "cipher");
+  const unreadable = new Set<FitImageMetadata["unreadable_fields"][number]>();
+  const field = <Value>(
+    key: FitImageMetadata["unreadable_fields"][number],
+    reader: FitFact<Value | null>,
+    source = node,
+    property: string = key,
+  ): Value | null => {
+    const value = reader(facts, source, property);
+    if (value === null && propertyOf(source, property) !== undefined)
+      unreadable.add(key);
+    return value;
+  };
   const metadata = {
     kind: "fit-image" as const,
     index,
     name,
-    description: fitString(facts, node, "description"),
-    type: fitString(facts, node, "type"),
-    arch: fitString(facts, node, "arch"),
-    os: fitString(facts, node, "os"),
-    compression: fitString(facts, node, "compression"),
-    load: fitAddress(facts, node, "load"),
-    entry: fitAddress(facts, node, "entry"),
+    description: field("description", fitString),
+    type: field("type", fitString),
+    arch: field("arch", fitString),
+    os: field("os", fitString),
+    compression: field("compression", fitString),
+    load: field("load", fitAddress),
+    entry: field("entry", fitAddress),
     data_source: range.data_source,
     declared_offset: range.declared_offset,
     image_data: imageData?.[0] ?? null,
     cipher_present: cipher !== undefined,
-    cipher_algo: cipher === undefined ? null : fitString(facts, cipher, "algo"),
+    cipher_algo:
+      cipher === undefined
+        ? null
+        : field("cipher_algo", fitString, cipher, "algo"),
   };
   const { hashes, algorithms, unverified } = imageHashes(facts, node, children);
   const signatures = signatureAlgorithms(facts, children);
@@ -358,12 +373,13 @@ const imageDeclaration = (
     hashes,
     metadata: {
       ...metadata,
-      hash_algorithms: algorithms.join(" "),
+      unreadable_fields: [...unreadable].sort(),
+      hash_algorithms: algorithms,
       hashes_verified: hashes.length,
       hashes_unverified: unverified,
       signature_count: signatures.count,
       signatures_unreadable: signatures.unreadable,
-      signature_algorithms: signatures.algorithms.join(" "),
+      signature_algorithms: signatures.algorithms,
     },
   };
 };

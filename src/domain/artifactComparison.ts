@@ -612,25 +612,24 @@ const compareFitImageDeclarations = ({
       availability: result === "unknown" ? "unknown" : "unchanged",
     };
   }
-  // Limitations preserve unavailable interpretations. Without a field-specific
-  // diagnosis, nullable declarations remain conservatively unknown, not absent.
-  const leftUnknown =
-    (left?.limitations.length ?? 0) > 0 ||
-    (lm.cipher_present && lm.cipher_algo === null);
-  const rightUnknown =
-    (right?.limitations.length ?? 0) > 0 ||
-    (rm.cipher_present && rm.cipher_algo === null);
   const ld = fitImageDeclaration(lm);
   const rd = fitImageDeclaration(rm);
   const keys = Object.keys(ld) as (keyof typeof ld)[];
-  const changed = keys.some((key) => {
-    if ((ld[key] === null && leftUnknown) || (rd[key] === null && rightUnknown))
-      return false;
-    return ld[key] !== rd[key];
-  });
+  let changed = false;
+  let unavailable = false;
+  for (const key of keys) {
+    if (
+      lm.unreadable_fields.some((field) => field === key) ||
+      rm.unreadable_fields.some((field) => field === key)
+    ) {
+      unavailable = true;
+      continue;
+    }
+    if (ld[key] !== rd[key]) changed = true;
+  }
   return {
     declaration: changed ? "changed" : "unchanged",
-    availability: leftUnknown || rightUnknown ? "unknown" : "unchanged",
+    availability: unavailable ? "unknown" : "unchanged",
   };
 };
 

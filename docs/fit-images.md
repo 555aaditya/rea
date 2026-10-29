@@ -50,8 +50,10 @@ Image `format_metadata` (`fit-image`) records `index`, `name`, `description`,
 the raw `declared_offset` for external data, `image_data` (the shared-data
 link), `cipher_present`, `cipher_algo`, `hash_algorithms`, `hashes_verified`,
 `hashes_unverified`, `signature_count`, `signatures_unreadable` and
-`signature_algorithms`. Algorithm lists are separated
-by spaces. `load` and `entry` fold one or two 32-bit cells into a lowercase
+`signature_algorithms`. Algorithm lists are arrays. Nullable declaration fields
+are absent unless named in `unreadable_fields`, which records parsing failures
+per field. Hash or signature warnings do not make unrelated declarations unknown.
+`load` and `entry` fold one or two 32-bit cells into a lowercase
 `0x…` value, as U-Boot does, independent of `#address-cells`.
 
 Root `format_metadata` (`fit`) records `fdt_version`, `fdt_totalsize`,

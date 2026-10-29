@@ -286,6 +286,17 @@ it("rejects forged entries and changed carrier identity, then closes idempotentl
   const reader = new FitArtifactReader(path);
   try {
     const entry = await firstEntry(reader);
+    if (entry.formatMetadata?.kind !== "fit-image")
+      throw new Error("Missing FIT image metadata");
+    await expect(
+      reader.open({
+        ...entry,
+        formatMetadata: {
+          ...entry.formatMetadata,
+          unreadable_fields: ["load"],
+        },
+      }),
+    ).rejects.toMatchObject({ reason: "integrity" });
     await expect(
       reader.open({ ...entry, byteOffset: 0 }),
     ).rejects.toMatchObject({ reason: "integrity" });

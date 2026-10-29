@@ -353,7 +353,7 @@ const fitProbes = (
     if (row.declared_size === null) continue;
     if (image.entry !== null && image.entry !== image.load) continue;
     // An unavailable entry is not proof that the declaration was absent.
-    if (image.entry === null && row.limitations.length > 0) continue;
+    if (image.unreadable_fields.includes("entry")) continue;
     const admitted = admitRawBinary({
       architecture: image.arch,
       entryPoint: image.load,

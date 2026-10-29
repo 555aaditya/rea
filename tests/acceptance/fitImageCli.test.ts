@@ -253,7 +253,7 @@ cliTest(
     expect(signed?.format_metadata).toMatchObject({
       signature_count: 2,
       signatures_unreadable: 2,
-      signature_algorithms: "",
+      signature_algorithms: [],
     });
     expect(
       signed?.limitations.some((value) => value.includes("signature-missing")),
@@ -296,6 +296,14 @@ cliTest.for([
     entry: cells(0x400000),
     bytes: 4,
     allowed: true,
+  },
+  {
+    label: "unrelated hash warning",
+    arch: "arm",
+    load: cells(0x400000),
+    bytes: 4,
+    allowed: true,
+    unsupportedHash: true,
   },
   {
     label: "absent entry",
@@ -364,6 +372,19 @@ cliTest.for([
         {
           name: "kernel",
           data: Buffer.alloc(item.bytes, 1),
+          ...("unsupportedHash" in item
+            ? {
+                children: [
+                  {
+                    name: "hash-unsupported",
+                    properties: {
+                      algo: dtString("crc16-ccitt"),
+                      value: Buffer.alloc(2),
+                    },
+                  },
+                ],
+              }
+            : {}),
           properties: {
             compression: dtString("none"),
             load: item.load,

@@ -230,9 +230,9 @@ export const fitMetadataSchema = z.strictObject({
 export type FitMetadata = z.infer<typeof fitMetadataSchema>;
 
 /**
- * One /images node's declared facts. Primitive fields only, because
- * sameFormatMetadata compares entry metadata with ===. Load and entry are
- * declarations, and stored bytes may be compressed or ciphered.
+ * One /images node's facts. Null fields are absent unless unreadable_fields
+ * identifies an interpretation failure. Load and entry are declarations;
+ * stored bytes may be compressed or ciphered.
  */
 export const fitImageMetadataSchema = z.strictObject({
   kind: z.literal("fit-image"),
@@ -251,12 +251,24 @@ export const fitImageMetadataSchema = z.strictObject({
   /** Presence is independent of whether the declared algorithm is readable. */
   cipher_present: z.boolean(),
   cipher_algo: z.string().nullable(),
-  hash_algorithms: z.string(),
+  unreadable_fields: z.array(
+    z.enum([
+      "description",
+      "type",
+      "arch",
+      "os",
+      "compression",
+      "load",
+      "entry",
+      "cipher_algo",
+    ]),
+  ),
+  hash_algorithms: z.array(z.string()),
   hashes_verified: uint32,
   hashes_unverified: uint32,
   signature_count: uint32,
   signatures_unreadable: uint32,
-  signature_algorithms: z.string(),
+  signature_algorithms: z.array(z.string()),
 });
 export type FitImageMetadata = z.infer<typeof fitImageMetadataSchema>;
 /** Payload interpretation and sharing declarations, independent of FIT placement. */

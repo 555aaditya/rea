@@ -88,12 +88,13 @@ describe("FIT image facts", () => {
       image_data: null,
       cipher_present: false,
       cipher_algo: null,
-      hash_algorithms: "crc32 md5 sha1 sha256 sha384 sha512",
+      unreadable_fields: [],
+      hash_algorithms: ["crc32", "md5", "sha1", "sha256", "sha384", "sha512"],
       hashes_verified: 6,
       hashes_unverified: 0,
       signature_count: 0,
       signatures_unreadable: 0,
-      signature_algorithms: "",
+      signature_algorithms: [],
     });
     expect(structure.images[0]?.limitations).toEqual([]);
     expect(Buffer.compare(imageBytes(FIT_EMBEDDED, 0), FIT_KERNEL)).toBe(0);
@@ -324,10 +325,10 @@ describe("FIT hashes", () => {
       ["hash-1", "sha256"],
     ]);
     expect(image?.metadata).toMatchObject({
-      hash_algorithms: "sha256 crc16-ccitt sha1",
+      hash_algorithms: ["sha256", "crc16-ccitt", "sha1"],
       hashes_verified: 1,
       hashes_unverified: 3,
-      signature_algorithms: "sha256,rsa2048",
+      signature_algorithms: ["sha256,rsa2048"],
       cipher_present: true,
       cipher_algo: "aes256",
     });

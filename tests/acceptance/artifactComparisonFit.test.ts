@@ -34,18 +34,44 @@ it("compares FIT declarations while preserving layout independence and unknowns"
   const inspect = async (
     name: string,
     overrides: Record<string, Buffer> = {},
-    mode: "embedded" | "position" = "embedded",
-    prefix = false,
+    options: {
+      mode?: "embedded" | "position";
+      prefix?: boolean;
+      omitLoad?: boolean;
+      unsupportedHash?: boolean;
+    } = {},
   ): Promise<Evidence> => {
     const path = join(root, name);
+    const { load: _load, ...withoutLoad } = properties;
     await writeFile(
       path,
       fitFixture({
         images: [
-          ...(prefix ? [{ name: "prefix", data: Buffer.from("prefix") }] : []),
-          { ...image, properties: { ...properties, ...overrides } },
+          ...(options.prefix
+            ? [{ name: "prefix", data: Buffer.from("prefix") }]
+            : []),
+          {
+            ...image,
+            properties: {
+              ...(options.omitLoad ? withoutLoad : properties),
+              ...overrides,
+            },
+            ...(options.unsupportedHash
+              ? {
+                  children: [
+                    {
+                      name: "hash-unsupported",
+                      properties: {
+                        algo: dtString("crc16-ccitt"),
+                        value: Buffer.alloc(2),
+                      },
+                    },
+                  ],
+                }
+              : {}),
+          },
         ],
-        mode,
+        mode: options.mode ?? "embedded",
       }),
     );
     const opened = await call("open_binary", { path });
@@ -80,7 +106,11 @@ it("compares FIT declarations while preserving layout independence and unknowns"
       result.changes.filter((row) => row.logical_path === "images/kernel.bin"),
     ).toMatchObject([{ classification: "changed", dimensions: ["metadata"] }]);
   }
-  const relocated = await inspect("relocated.itb", {}, "position", true);
+  const relocated = await inspect(
+    "relocated.itb",
+    {},
+    { mode: "position", prefix: true },
+  );
   expect(occurrence(relocated).artifact_id).toBe(occurrence(left).artifact_id);
   expect(
     (await compare(left, relocated)).changes.filter(
@@ -111,4 +141,19 @@ it("compares FIT declarations while preserving layout independence and unknowns"
   ).toMatchObject([
     { classification: "changed", dimensions: ["metadata", "availability"] },
   ]);
+  const absent = await inspect(
+    "warn-absent.itb",
+    {},
+    { omitLoad: true, unsupportedHash: true },
+  );
+  const present = await inspect(
+    "warn-present.itb",
+    {},
+    { unsupportedHash: true },
+  );
+  expect(
+    (await compare(absent, present)).changes.filter(
+      (row) => row.logical_path === "images/kernel.bin",
+    ),
+  ).toMatchObject([{ classification: "changed", dimensions: ["metadata"] }]);
 });
