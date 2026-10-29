@@ -91,6 +91,8 @@ describe("FIT image facts", () => {
       hash_algorithms: "crc32 md5 sha1 sha256 sha384 sha512",
       hashes_verified: 6,
       hashes_unverified: 0,
+      signature_count: 0,
+      signatures_unreadable: 0,
       signature_algorithms: "",
     });
     expect(structure.images[0]?.limitations).toEqual([]);
@@ -419,10 +421,19 @@ describe("FIT configurations", () => {
       properties: { default: dtString("conf-x") },
       children: [{ name: "conf-a", properties: { kernel: dtString("gone") } }],
     });
-    expect(structure.limitations).toEqual([
-      "/configurations/conf-a: kernel references gone, which is not an /images node",
-      "/configurations: default conf-x names no configuration",
-    ]);
+    expect(structure.metadata.configurations[0]).toMatchObject({
+      kernel: ["gone"],
+      unresolved_reference_count: 1,
+    });
+    expect(structure.limitations).toHaveLength(2);
+    expect(
+      structure.limitations.some((value) =>
+        value.includes("/configurations/conf-a"),
+      ),
+    ).toBe(true);
+    expect(
+      structure.limitations.some((value) => value.includes("conf-x")),
+    ).toBe(true);
   });
 
   it("reports no configurations when the node is absent", () => {
@@ -524,4 +535,36 @@ describe("FIT fixed limits", () => {
       message: "FIT is malformed: /images node is missing",
     });
   });
+});
+
+it("bounds dangling-reference diagnostics while preserving every declared reference", () => {
+  const name = "c".repeat(4096);
+  const references = Array.from(
+    { length: FIT_MAX_CONFIGURATION_REFERENCES },
+    () => "missing",
+  );
+  const file = fitFixture({
+    images: [{ name: "kernel", data: Buffer.from("K") }],
+    configurations: {
+      name: "configurations",
+      children: [
+        { name, properties: { loadables: dtString(references.join("\0")) } },
+      ],
+    },
+  });
+  const structure = read(file);
+  expect(structure.limitations.length).toBe(1);
+  expect(structure.metadata.configurations[0]).toMatchObject({
+    name,
+    loadables: references,
+    unresolved_reference_count: references.length,
+  });
+  expect(
+    Buffer.byteLength(
+      JSON.stringify({
+        metadata: structure.metadata,
+        limitations: structure.limitations,
+      }),
+    ),
+  ).toBeLessThan(file.length * 4);
 });

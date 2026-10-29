@@ -220,6 +220,9 @@ export const fitMetadataSchema = z.strictObject({
       fdt: z.array(z.string()),
       ramdisk: z.array(z.string()),
       loadables: z.array(z.string()),
+      signature_count: uint32,
+      signatures_unreadable: uint32,
+      unresolved_reference_count: uint32,
       signature_algorithms: z.array(z.string()),
     }),
   ),
@@ -251,6 +254,8 @@ export const fitImageMetadataSchema = z.strictObject({
   hash_algorithms: z.string(),
   hashes_verified: uint32,
   hashes_unverified: uint32,
+  signature_count: uint32,
+  signatures_unreadable: uint32,
   signature_algorithms: z.string(),
 });
 export type FitImageMetadata = z.infer<typeof fitImageMetadataSchema>;

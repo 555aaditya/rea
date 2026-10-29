@@ -49,7 +49,8 @@ Image `format_metadata` (`fit-image`) records `index`, `name`, `description`,
 `type`, `arch`, `os`, `compression`, `load` and `entry`, the `data_source`,
 the raw `declared_offset` for external data, `image_data` (the shared-data
 link), `cipher_present`, `cipher_algo`, `hash_algorithms`, `hashes_verified`,
-`hashes_unverified` and `signature_algorithms`. Algorithm lists are separated
+`hashes_unverified`, `signature_count`, `signatures_unreadable` and
+`signature_algorithms`. Algorithm lists are separated
 by spaces. `load` and `entry` fold one or two 32-bit cells into a lowercase
 `0x…` value, as U-Boot does, independent of `#address-cells`.
 
@@ -84,7 +85,10 @@ readable `algo`, and a hash without a `value` are not verified; each is
 counted in `hashes_unverified` and reported as an image limitation.
 
 Signature subnodes (names starting with `signature`) on images and
-configurations are reported by algorithm only. Signatures are never verified.
+configurations retain the total declaration count, readable algorithms and
+`signatures_unreadable`. Missing or malformed algorithms carry source limitations
+so unknown declarations remain distinguishable from absence. Signatures are never
+verified.
 
 ## Configurations
 
@@ -93,7 +97,9 @@ and the image references `kernel`, `firmware`, `fdt` (base plus overlays),
 `ramdisk` and `loadables`, always as lists, plus its signature algorithms.
 `compatible`, `fpga`, `script`, `cmdline` and `load-only` are not reported. A
 reference to a name that is not an `/images` child, and a `default` that names
-no configuration, are reported as limitations and kept as declared.
+no configuration, are reported as limitations and kept as declared. Each
+configuration carries `unresolved_reference_count`; dangling references share one
+configuration-level diagnostic while every original reference remains available.
 
 ## Facts, limitations and failures
 

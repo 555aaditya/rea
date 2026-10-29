@@ -207,3 +207,83 @@ cliTest.for([true, false])(
     );
   },
 );
+
+cliTest(
+  "preserves unreadable image and configuration signature declarations",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-fit-unknown-signatures-");
+    const source = join(root, "signed.itb");
+    const signatures = [
+      { name: "signature-missing", properties: {} },
+      {
+        name: "signature-malformed",
+        properties: { algo: Buffer.from([0xff, 0]) },
+      },
+    ];
+    await writeFile(
+      source,
+      fitFixture({
+        images: [
+          { name: "plain", data: Buffer.from("plain") },
+          { name: "signed", data: Buffer.from("signed"), children: signatures },
+        ],
+        configurations: {
+          name: "configurations",
+          children: [{ name: "conf", children: signatures }],
+        },
+      }),
+    );
+    const response = await cli.run({
+      arguments: ["inspect-artifact", source, "--json"],
+    });
+    expect(response.exitCode, response.stdout + response.stderr).toBe(0);
+    const inspection = artifactInspectionResultSchema.parse(
+      parseEvidence(response.json).normalized_result,
+    );
+    const graph = artifactInventoryResultSchema.parse(
+      inspection.substeps[0]?.evidence.normalized_result,
+    );
+    expect(
+      graph.occurrences.find((row) => row.logical_path === "images/plain.bin")
+        ?.format_metadata,
+    ).toMatchObject({ signature_count: 0, signatures_unreadable: 0 });
+    const signed = graph.occurrences.find(
+      (row) => row.logical_path === "images/signed.bin",
+    );
+    expect(signed?.format_metadata).toMatchObject({
+      signature_count: 2,
+      signatures_unreadable: 2,
+      signature_algorithms: "",
+    });
+    expect(
+      signed?.limitations.some((value) => value.includes("signature-missing")),
+    ).toBe(true);
+    expect(
+      signed?.limitations.some((value) =>
+        value.includes("signature-malformed"),
+      ),
+    ).toBe(true);
+    const metadata = graph.occurrences.find(
+      (row) => row.logical_path === ".",
+    )?.format_metadata;
+    expect(metadata).toMatchObject({
+      configurations: [
+        {
+          signature_count: 2,
+          signatures_unreadable: 2,
+          signature_algorithms: [],
+        },
+      ],
+    });
+    expect(
+      graph.limitations.some((value) =>
+        value.includes("/configurations/conf/signature-missing"),
+      ),
+    ).toBe(true);
+    expect(
+      graph.limitations.some((value) =>
+        value.includes("/configurations/conf/signature-malformed"),
+      ),
+    ).toBe(true);
+  },
+);

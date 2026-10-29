@@ -294,16 +294,27 @@ const imageHashes = (
   return { hashes, algorithms, unverified };
 };
 
-/** Readable signature algorithms of an image or configuration; only reported. */
+/** Signature declarations remain visible even when their algorithm is unreadable. */
 const signatureAlgorithms = (
-  fdt: Buffer,
+  facts: FitFacts,
   children: readonly FitNode[],
-): string[] =>
-  children.flatMap((child) => {
-    if (!nodeName(child).startsWith("signature")) return [];
-    const algo = nulStrings(fdt, propertyOf(child, "algo"));
-    return algo?.length === 1 ? algo : [];
-  });
+): { algorithms: string[]; count: number; unreadable: number } => {
+  const algorithms: string[] = [];
+  let count = 0;
+  let unreadable = 0;
+  for (const child of children) {
+    if (!nodeName(child).startsWith("signature")) continue;
+    count += 1;
+    const algo = fitString(facts, child, "algo");
+    if (algo !== null) algorithms.push(algo);
+    else {
+      unreadable += 1;
+      if (propertyOf(child, "algo") === undefined)
+        facts.limitations.push(`${child.path}: signature algo is missing`);
+    }
+  }
+  return { algorithms, count, unreadable };
+};
 
 const imageDeclaration = (
   layout: FitLayout,
@@ -337,6 +348,7 @@ const imageDeclaration = (
     cipher_algo: cipher === undefined ? null : fitString(facts, cipher, "algo"),
   };
   const { hashes, algorithms, unverified } = imageHashes(facts, node, children);
+  const signatures = signatureAlgorithms(facts, children);
   return {
     index,
     name,
@@ -349,7 +361,9 @@ const imageDeclaration = (
       hash_algorithms: algorithms.join(" "),
       hashes_verified: hashes.length,
       hashes_unverified: unverified,
-      signature_algorithms: signatureAlgorithms(layout.fdt, children).join(" "),
+      signature_count: signatures.count,
+      signatures_unreadable: signatures.unreadable,
+      signature_algorithms: signatures.algorithms.join(" "),
     },
   };
 };
@@ -432,20 +446,25 @@ const fitConfiguration = (
     ramdisk: fitStrings(facts, node, "ramdisk"),
     loadables: fitStrings(facts, node, "loadables"),
   };
-  for (const [name, values] of Object.entries(references))
-    for (const reference of values)
-      if (!images.has(reference))
-        facts.limitations.push(
-          `${node.path}: ${name} references ${reference}, which is not an /images node`,
-        );
+  let unresolved = 0;
+  for (const values of Object.values(references))
+    for (const reference of values) if (!images.has(reference)) unresolved += 1;
+  if (unresolved > 0)
+    facts.limitations.push(
+      `${node.path}: ${String(unresolved)} image references do not name an /images node`,
+    );
+  const signatures = signatureAlgorithms(
+    facts,
+    layout.children.get(node.path) ?? [],
+  );
   return {
     name: nodeName(node),
     description: fitString(facts, node, "description"),
     ...references,
-    signature_algorithms: signatureAlgorithms(
-      layout.fdt,
-      layout.children.get(node.path) ?? [],
-    ),
+    unresolved_reference_count: unresolved,
+    signature_count: signatures.count,
+    signatures_unreadable: signatures.unreadable,
+    signature_algorithms: signatures.algorithms,
   };
 };
 
