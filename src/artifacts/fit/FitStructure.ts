@@ -387,7 +387,8 @@ const assertImageDataLinks = (
       );
     // Embedded copies occupy distinct properties but must contain equal bytes.
     if (
-      target.metadata.data_source !== image.metadata.data_source ||
+      (target.metadata.data_source === "embedded") !==
+        (image.metadata.data_source === "embedded") ||
       target.size !== image.size ||
       (image.metadata.data_source === "embedded"
         ? !fdt

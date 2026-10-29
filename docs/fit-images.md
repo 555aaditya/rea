@@ -140,6 +140,13 @@ After extraction:
   architecture matching its declared `arch`, and `entry_point` set to its
   declared `load` address; raw-binary maps file offset 0 at `entry_point`.
 
+## Comparison
+
+Artifact comparison reports changes to an image's payload interpretation,
+including load and entry declarations. Equivalent external offset forms and
+inventory positions leave those declarations unchanged. Unavailable
+interpretations remain unknown, while independently known changes survive.
+
 ## Verification
 
 Synthetic fixtures with computed hashes cover embedded, `data-offset` and

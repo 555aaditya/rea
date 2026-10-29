@@ -568,3 +568,47 @@ it("bounds dangling-reference diagnostics while preserving every declared refere
     ),
   ).toBeLessThan(file.length * 4);
 });
+
+it.each(["data-offset", "data-position"] as const)(
+  "accepts a shared external range whose target uses %s",
+  (targetKey) => {
+    const linkedKey =
+      targetKey === "data-offset" ? "data-position" : "data-offset";
+    const data = Buffer.from("payload");
+    const build = (start: number) =>
+      devicetreeFixture({
+        name: "",
+        children: [
+          {
+            name: "images",
+            children: [
+              {
+                name: "target",
+                properties: {
+                  [targetKey]: cells(targetKey === "data-offset" ? 0 : start),
+                  "data-size": cells(data.length),
+                },
+              },
+              {
+                name: "linked",
+                properties: {
+                  [linkedKey]: cells(linkedKey === "data-offset" ? 0 : start),
+                  "data-size": cells(data.length),
+                  "image-data": dtString("target"),
+                },
+              },
+            ],
+          },
+        ],
+      });
+    const start = Math.ceil(build(0).length / 4) * 4;
+    const fdt = build(start);
+    const file = Buffer.concat([fdt, Buffer.alloc(start - fdt.length), data]);
+    const [target, linked] = read(file).images;
+    expect(target?.start).toBe(start);
+    expect(linked?.start).toBe(start);
+    expect(target?.metadata.data_source).toBe(targetKey);
+    expect(linked?.metadata.data_source).toBe(linkedKey);
+    expect(imageBytes(file, 1).equals(data)).toBe(true);
+  },
+);

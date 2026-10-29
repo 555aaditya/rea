@@ -259,6 +259,19 @@ export const fitImageMetadataSchema = z.strictObject({
   signature_algorithms: z.string(),
 });
 export type FitImageMetadata = z.infer<typeof fitImageMetadataSchema>;
+/** Payload interpretation and sharing declarations, independent of FIT placement. */
+export const fitImageDeclaration = (metadata: FitImageMetadata) => ({
+  type: metadata.type,
+  arch: metadata.arch,
+  os: metadata.os,
+  compression: metadata.compression,
+  load: metadata.load,
+  entry: metadata.entry,
+  image_data: metadata.image_data,
+  cipher_present: metadata.cipher_present,
+  cipher_algo: metadata.cipher_algo,
+});
+
 /** Runtime member identity, independent of blob layout and directory order. */
 export const nodeSeaEntryDeclaration = (
   metadata: z.infer<typeof nodeSeaEntryMetadataSchema>,

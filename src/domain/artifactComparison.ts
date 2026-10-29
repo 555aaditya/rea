@@ -15,6 +15,7 @@ import {
 } from "./artifactInventoryEvidence.js";
 import {
   espImageSegmentDeclaration,
+  fitImageDeclaration,
   nodeSeaEntryDeclaration,
   pyInstallerEntryDeclaration,
 } from "./artifactFormatMetadata.js";
@@ -464,6 +465,8 @@ interface OccurrenceMetadata {
   readonly asarPacking: MetadataComparison;
   readonly nodeSea: MetadataComparison;
   readonly espImageSegment: MetadataComparison;
+  readonly fitImage: MetadataComparison;
+  readonly fitImageAvailability: MetadataComparison;
   readonly pyInstaller: MetadataComparison;
 }
 
@@ -471,7 +474,8 @@ interface OccurrenceMetadata {
 const declarationChanged = (metadata: OccurrenceMetadata): boolean =>
   metadata.asarPacking === "changed" ||
   metadata.nodeSea === "changed" ||
-  metadata.espImageSegment === "changed";
+  metadata.espImageSegment === "changed" ||
+  metadata.fitImage === "changed";
 
 /** Unknown classifications and absent node metadata cannot establish a difference. */
 const differsWithUnknown = (
@@ -550,7 +554,10 @@ const compareOptionalMetadata = <T>(
 const occurrenceMetadata = (input: OccurrencePair): OccurrenceMetadata => {
   const left = input.leftOccurrence;
   const right = input.rightOccurrence;
+  const fit = compareFitImageDeclarations(input);
   return {
+    fitImage: fit.declaration,
+    fitImageAvailability: fit.availability,
     asarPacking: compareOptionalMetadata(
       left?.unpacked,
       right?.unpacked,
@@ -579,6 +586,51 @@ const occurrenceMetadata = (input: OccurrencePair): OccurrenceMetadata => {
       isPyInstallerEntry(right) ? right.format_metadata : undefined,
       pyInstallerEntryDeclaration,
     ),
+  };
+};
+
+/** Keep known FIT changes even when another declaration is unavailable. */
+const compareFitImageDeclarations = ({
+  leftOccurrence: left,
+  rightOccurrence: right,
+}: OccurrencePair): {
+  readonly declaration: MetadataComparison;
+  readonly availability: MetadataComparison;
+} => {
+  const lm =
+    left?.format_metadata?.kind === "fit-image"
+      ? left.format_metadata
+      : undefined;
+  const rm =
+    right?.format_metadata?.kind === "fit-image"
+      ? right.format_metadata
+      : undefined;
+  if (lm === undefined || rm === undefined) {
+    const result = compareOptionalMetadata(lm, rm, fitImageDeclaration);
+    return {
+      declaration: result,
+      availability: result === "unknown" ? "unknown" : "unchanged",
+    };
+  }
+  // Limitations preserve unavailable interpretations. Without a field-specific
+  // diagnosis, nullable declarations remain conservatively unknown, not absent.
+  const leftUnknown =
+    (left?.limitations.length ?? 0) > 0 ||
+    (lm.cipher_present && lm.cipher_algo === null);
+  const rightUnknown =
+    (right?.limitations.length ?? 0) > 0 ||
+    (rm.cipher_present && rm.cipher_algo === null);
+  const ld = fitImageDeclaration(lm);
+  const rd = fitImageDeclaration(rm);
+  const keys = Object.keys(ld) as (keyof typeof ld)[];
+  const changed = keys.some((key) => {
+    if ((ld[key] === null && leftUnknown) || (rd[key] === null && rightUnknown))
+      return false;
+    return ld[key] !== rd[key];
+  });
+  return {
+    declaration: changed ? "changed" : "unchanged",
+    availability: leftUnknown || rightUnknown ? "unknown" : "unchanged",
   };
 };
 
