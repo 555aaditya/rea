@@ -197,9 +197,6 @@ export const hexRecordRegionMetadataSchema = z.strictObject({
   first_line: offset,
   last_line: offset,
 });
-export type HexRecordRegionMetadata = z.infer<
-  typeof hexRecordRegionMetadataSchema
->;
 
 /**
  * U-Boot FIT root facts. Configuration references are declared names; a
