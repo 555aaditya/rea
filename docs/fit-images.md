@@ -14,7 +14,8 @@ rea extract-artifact ./boot.itb --json
 For MCP, open the file with `open_binary`, then call `inspect_artifact`. Summary
 delivery retains the complete Evidence; use `parent_evidence_id` with
 `inspect_analysis_view` to read selected images and fields. `extract_artifact`
-returns a fresh `output_root` containing one raw file per image.
+returns a fresh `output_root` containing one raw file per image. FIT summaries
+use the current projection identity; there is no pre-coverage FIT summary variant.
 
 ## Recognition
 
@@ -62,6 +63,9 @@ Image bytes are reported as stored. Compressed images are not decompressed and
 ciphered images are not decrypted: entries report `encrypted: false` and the
 cipher declaration in `cipher_present` and algorithm in `cipher_algo`. A missing
 or malformed algorithm stays `null`; it does not establish unciphered bytes.
+Embedded `image-data` links require byte-identical stored properties; external
+links require matching physical ranges.
+
 The extracted file holds the stored bytes. Direct-analysis suggestions require
 `compression: "none"` and `cipher_present: false`.
 

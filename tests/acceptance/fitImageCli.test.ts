@@ -158,3 +158,52 @@ cliTest.for([
     );
   },
 );
+
+cliTest.for([true, false])(
+  "checks embedded image-data content (equal=%s)",
+  async (equal, { cli }) => {
+    const directory = await createTestTempDirectory("rea-fit-shared-cli-");
+    const source = join(directory, "shared.itb");
+    await writeFile(
+      source,
+      fitFixture({
+        images: [
+          { name: "target", data: Buffer.from("AAAA") },
+          {
+            name: "linked",
+            data: Buffer.from(equal ? "AAAA" : "BBBB"),
+            properties: { "image-data": dtString("target") },
+          },
+        ],
+      }),
+    );
+    const inspected = await cli.run({
+      arguments: ["inspect-artifact", source, "--json"],
+    });
+    if (!equal) {
+      expect(inspected.exitCode).not.toBe(0);
+      expect(inspected.stdout + inspected.stderr).toContain(
+        "image-data target /images/target",
+      );
+      return;
+    }
+    expect(inspected.exitCode, inspected.stdout + inspected.stderr).toBe(0);
+    const inspection = artifactInspectionResultSchema.parse(
+      parseEvidence(inspected.json).normalized_result,
+    );
+    const graph = artifactInventoryResultSchema.parse(
+      inspection.substeps[0]?.evidence.normalized_result,
+    );
+    const target = graph.occurrences.find(
+      (row) => row.logical_path === "images/target.bin",
+    );
+    const linked = graph.occurrences.find(
+      (row) => row.logical_path === "images/linked.bin",
+    );
+    expect(linked?.format_metadata).toMatchObject({ image_data: "target" });
+    expect(linked?.artifact_id).toBe(target?.artifact_id);
+    expect(linked?.source_location?.offset).not.toBe(
+      target?.source_location?.offset,
+    );
+  },
+);

@@ -355,7 +355,10 @@ const imageDeclaration = (
 };
 
 /** image-data must name an unchained image whose data properties agree. */
-const assertImageDataLinks = (images: readonly FitImageDeclaration[]): void => {
+const assertImageDataLinks = (
+  images: readonly FitImageDeclaration[],
+  fdt: Buffer,
+): void => {
   const byName = new Map(images.map((image) => [image.name, image]));
   for (const image of images) {
     const name = image.metadata.image_data;
@@ -368,12 +371,15 @@ const assertImageDataLinks = (images: readonly FitImageDeclaration[]): void => {
       throw formatFailure(
         `${path}: image-data target /images/${name} has its own image-data`,
       );
-    // Embedded copies are separate properties, so only their sizes can agree.
+    // Embedded copies occupy distinct properties but must contain equal bytes.
     if (
       target.metadata.data_source !== image.metadata.data_source ||
       target.size !== image.size ||
-      (image.metadata.data_source !== "embedded" &&
-        target.start !== image.start)
+      (image.metadata.data_source === "embedded"
+        ? !fdt
+            .subarray(image.start, image.start + image.size)
+            .equals(fdt.subarray(target.start, target.start + target.size))
+        : target.start !== image.start)
     )
       throw formatFailure(
         `${path}: data does not match its image-data target /images/${name}`,
@@ -539,7 +545,7 @@ export const readFitStructure = (
   const images = imageNodes.map((node, index) =>
     imageDeclaration(layout, node, index),
   );
-  assertImageDataLinks(images);
+  assertImageDataLinks(images, fdt);
   assertDisjoint(images, totalsize);
   const declared = images.reduce((sum, image) => sum + image.size, 0);
   const budget = artifactExpansionBudgetBytes(fileSize);
