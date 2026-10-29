@@ -90,7 +90,7 @@ export const copyArtifactEntry = (entry: ArtifactEntry): ArtifactEntry => ({
     entry.declaredIntegrity === null ? null : { ...entry.declaredIntegrity },
   ...(entry.formatMetadata === undefined
     ? {}
-    : { formatMetadata: { ...entry.formatMetadata } }),
+    : { formatMetadata: structuredClone(entry.formatMetadata) }),
   ...(entry.sourceIdentity === undefined
     ? {}
     : { sourceIdentity: { ...entry.sourceIdentity } }),

@@ -281,6 +281,32 @@ it("rejects a changed carrier during extraction preparation", async () => {
   }
 });
 
+it("isolates returned declaration arrays from saved FIT facts", async () => {
+  const reader = new FitArtifactReader(
+    await writeFit("metadata-copy.itb", FIT_EXTERNAL),
+  );
+  try {
+    const entry = await firstEntry(reader);
+    if (entry.formatMetadata?.kind !== "fit-image")
+      throw new Error("Missing FIT image metadata");
+    const original = structuredClone(entry.formatMetadata);
+    entry.formatMetadata.unreadable_fields.push("load");
+    entry.formatMetadata.hash_algorithms[0] = "changed";
+    entry.formatMetadata.signature_algorithms.push("changed");
+    const fresh = await firstEntry(reader);
+    expect(fresh.formatMetadata).toEqual(original);
+    await expect(reader.open(entry)).rejects.toMatchObject({
+      reason: "integrity",
+    });
+    const stream = await reader.open(fresh);
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) chunks.push(chunk as Buffer);
+    expect(Buffer.concat(chunks).equals(FIT_KERNEL)).toBe(true);
+  } finally {
+    await reader.close();
+  }
+});
+
 it("rejects forged entries and changed carrier identity, then closes idempotently", async () => {
   const path = await writeFit("identity.itb", FIT_EXTERNAL);
   const reader = new FitArtifactReader(path);
