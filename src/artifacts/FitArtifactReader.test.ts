@@ -446,21 +446,35 @@ it("preserves a final validation failure when cancellation overlaps it", async (
   });
   const failure = new ArtifactReaderFailure("integrity", "carrier changed");
   const read = ArtifactFileSource.prototype.read;
-  let calls = 0;
+  const readChunks = fileChunks.readFileHandleChunks;
+  let owner: ArtifactFileSource | undefined;
+  let imageEnded = false;
   let observer: ReturnType<typeof vi.spyOn> | undefined;
+  let chunksObserver: ReturnType<typeof vi.spyOn> | undefined;
   let consumed: Promise<void> | undefined;
   try {
     const entry = await firstEntry(reader);
     observer = vi
       .spyOn(ArtifactFileSource.prototype, "read")
       .mockImplementation(async function (this: ArtifactFileSource, signal) {
-        calls += 1;
-        if (calls === 2) {
+        // Only this reader's open/validation receives this caller signal.
+        if (signal === controller.signal) owner ??= this;
+        if (this === owner && imageEnded) {
           acknowledge();
           await released;
           throw failure;
         }
         return read.call(this, signal);
+      });
+    chunksObserver = vi
+      .spyOn(fileChunks, "readFileHandleChunks")
+      .mockImplementation((handle, options) => {
+        const source = readChunks(handle, options);
+        if (options?.signal === controller.signal)
+          source.once("end", () => {
+            imageEnded = true;
+          });
+        return source;
       });
     const stream = await reader.open(entry, controller.signal);
     consumed = (async () => {
@@ -478,6 +492,7 @@ it("preserves a final validation failure when cancellation overlaps it", async (
   } finally {
     resume();
     await consumed?.catch(() => undefined);
+    chunksObserver?.mockRestore();
     observer?.mockRestore();
     await reader.close();
   }
