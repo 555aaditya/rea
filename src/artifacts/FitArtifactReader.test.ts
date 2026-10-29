@@ -1,3 +1,4 @@
+import { getEventListeners, once } from "node:events";
 import { readFile, truncate, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -5,8 +6,11 @@ import { expect, it, vi } from "vitest";
 
 import { FitArtifactReader } from "./FitArtifactReader.js";
 import { ArtifactResourceScope } from "./ArtifactResourceScope.js";
+import { ArtifactFileSource } from "./ArtifactFileSource.js";
+import { ArtifactReaderFailure } from "./ArtifactReader.js";
 import { extractArtifact } from "./extraction/ArtifactExtraction.js";
 import * as fitStructure from "./fit/FitStructure.js";
+import * as fileChunks from "../filesystem/readFileHandleChunks.js";
 import {
   FIT_DEVICETREE,
   FIT_EMBEDDED,
@@ -19,6 +23,7 @@ import {
   devicetreeFixture,
 } from "../firmware/devicetree/Devicetree.fixture.js";
 import { createTestTempDirectory } from "../../tests/fixtures/temporaryDirectory.js";
+import { awaitAcknowledgement } from "../../tests/fixtures/lifecycleAcknowledgement.js";
 import { scanCanonicalArtifactInventory } from "../../tests/fixtures/artifactInventory.js";
 
 const MIB = 1024 * 1024;
@@ -379,6 +384,101 @@ it("keeps the cancellation reason after an image stream was opened", async () =>
     await reader.close();
     expect(stream.closed).toBe(true);
   } finally {
+    await reader.close();
+  }
+});
+
+it.each([null, { stage: "buffered image" }])(
+  "keeps cancellation attached to buffered image bytes (reason %j)",
+  async (reason) => {
+    const reader = new FitArtifactReader(
+      await writeFit("buffered.itb", FIT_EXTERNAL),
+    );
+    const controller = new AbortController();
+    const readChunks = fileChunks.readFileHandleChunks;
+    let sourceClosed: Promise<unknown> | undefined;
+    let observer: ReturnType<typeof vi.spyOn> | undefined;
+    try {
+      const entry = await firstEntry(reader);
+      observer = vi
+        .spyOn(fileChunks, "readFileHandleChunks")
+        .mockImplementation((...args) => {
+          const source = readChunks(...args);
+          sourceClosed = once(source, "close");
+          return source;
+        });
+      const stream = await reader.open(entry, controller.signal);
+      await once(stream, "finish");
+      expect(sourceClosed).toBeDefined();
+      await sourceClosed;
+      expect(stream.readableLength).toBe(FIT_KERNEL.length);
+      expect(stream.closed).toBe(false);
+      controller.abort(reason);
+      await expect(
+        (async () => {
+          for await (const _chunk of stream) {
+            /* drain */
+          }
+        })(),
+      ).rejects.toMatchObject({ reason: "cancelled", cause: reason });
+      await reader.close();
+      expect(stream.closed).toBe(true);
+      expect(getEventListeners(controller.signal, "abort")).toEqual([]);
+    } finally {
+      observer?.mockRestore();
+      await reader.close();
+    }
+  },
+);
+
+it("preserves a final validation failure when cancellation overlaps it", async () => {
+  const reader = new FitArtifactReader(
+    await writeFit("final-validation.itb", FIT_EXTERNAL),
+  );
+  const controller = new AbortController();
+  let acknowledge = (): void => undefined;
+  let resume = (): void => undefined;
+  const entered = new Promise<void>((resolve) => {
+    acknowledge = resolve;
+  });
+  const released = new Promise<void>((resolve) => {
+    resume = resolve;
+  });
+  const failure = new ArtifactReaderFailure("integrity", "carrier changed");
+  const read = ArtifactFileSource.prototype.read;
+  let calls = 0;
+  let observer: ReturnType<typeof vi.spyOn> | undefined;
+  let consumed: Promise<void> | undefined;
+  try {
+    const entry = await firstEntry(reader);
+    observer = vi
+      .spyOn(ArtifactFileSource.prototype, "read")
+      .mockImplementation(async function (this: ArtifactFileSource, signal) {
+        calls += 1;
+        if (calls === 2) {
+          acknowledge();
+          await released;
+          throw failure;
+        }
+        return read.call(this, signal);
+      });
+    const stream = await reader.open(entry, controller.signal);
+    consumed = (async () => {
+      for await (const _chunk of stream) {
+        /* drain */
+      }
+    })();
+    await awaitAcknowledgement(entered, consumed, "FIT final validation");
+    controller.abort({ stage: "final validation" });
+    resume();
+    await expect(consumed).rejects.toBe(failure);
+    await reader.close();
+    expect(stream.closed).toBe(true);
+    expect(getEventListeners(controller.signal, "abort")).toEqual([]);
+  } finally {
+    resume();
+    await consumed?.catch(() => undefined);
+    observer?.mockRestore();
     await reader.close();
   }
 });

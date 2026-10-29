@@ -112,18 +112,36 @@ export class FitArtifactReader implements ArtifactReader {
       const output = this.#imageStream(stored, signal);
       output.on("error", () => undefined);
       this.#streams.add(output);
-      // A finished producer can leave source bytes buffered for its consumer.
-      // Keep the readable side owned until it closes as well.
-      output.once("close", () => this.#streams.delete(output));
+      let producerComplete = false;
+      const onAbort = (): void => {
+        // Active I/O and final validation own failure precedence. Buffered
+        // readable bytes still belong to the caller after they finish.
+        if (!producerComplete || output.destroyed) return;
+        output.destroy(cancellationFailure(signal?.reason));
+      };
+      const retired = new Promise<void>((resolve) => {
+        output.once("close", () => {
+          this.#streams.delete(output);
+          signal?.removeEventListener("abort", onAbort);
+          resolve();
+        });
+      });
+      signal?.addEventListener("abort", onAbort, { once: true });
+      if (signal?.aborted) onAbort();
       void this.#scope
-        .run(
-          () =>
-            new Promise<void>((resolve) => {
+        .run(async () => {
+          // Retain both producer work and the unconsumed readable stream.
+          await Promise.all([
+            new Promise<void>((resolve) =>
               pipeline(source, output, () => {
+                producerComplete = true;
+                if (signal?.aborted) onAbort();
                 resolve();
-              });
-            }),
-        )
+              }),
+            ),
+            retired,
+          ]);
+        })
         .catch((cause: unknown) =>
           output.destroy(
             cause instanceof Error
